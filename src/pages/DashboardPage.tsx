@@ -14,6 +14,27 @@ const ACTIVITY_LABEL: Record<string, string> = {
   prayer: 'Oración', dinner: 'Cena', movie: 'Película', game: 'Juego', walk: 'Paseo', reading: 'Lectura', other: 'Actividad',
 };
 
+function MemberBar({ name, emoji, minutes, maxMinutes }: { name: string; emoji: string; minutes: number; maxMinutes: number }) {
+  const pct = maxMinutes > 0 ? Math.round((minutes / maxMinutes) * 100) : 0;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  const label = h > 0 ? `${h}h ${m}m` : `${m}m`;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
+      <span style={{ fontSize: '1.2rem', minWidth: 28 }}>{emoji}</span>
+      <div style={{ flex: 1 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: 4 }}>
+          <span style={{ fontWeight: 600 }}>{name}</span>
+          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--secondary)' }}>{label}</span>
+        </div>
+        <div className="progress-bar-track">
+          <div className="progress-bar-fill" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, var(--primary), var(--secondary))', transition: 'width 0.6s ease' }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function HarmonyGauge({ score, rating, label }: { score: number; rating: string; label: string }) {
   const color = getHarmonyColor(rating as never);
   const r = 54;
@@ -212,7 +233,7 @@ export default function DashboardPage() {
                 <div key={log.id} className="log-preview-item">
                   <div className="log-activity-icon">{ACTIVITY_EMOJI[log.activity_type] ?? '⭐'}</div>
                   <div className="log-preview-info">
-                    <div className="log-preview-type">{ACTIVITY_LABEL[log.activity_type] ?? log.activity_type}</div>
+                    <div className="log-preview-type">{(log as {activity_label?: string}).activity_label || ACTIVITY_LABEL[log.activity_type] || log.activity_type}</div>
                     <div className="log-preview-meta">
                       {log.member_ids.map(id => membersMap[id]?.avatar_emoji ?? '👤').join(' ')} ·{' '}
                       {log.duration_minutes} min ·{' '}
@@ -228,6 +249,56 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* Family Time Stats */}
+      {members.length > 0 && logs.length > 0 && (() => {
+        const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
+        const weekLogs = logs.filter(l => new Date(l.logged_at) >= weekAgo);
+        
+        // Minutes per member
+        const memberMin: Record<string, number> = {};
+        weekLogs.forEach(l => {
+          l.member_ids.forEach(id => { memberMin[id] = (memberMin[id] ?? 0) + l.duration_minutes; });
+        });
+        const ranked = members
+          .map(m => ({ ...m, minutes: memberMin[m.id] ?? 0 }))
+          .filter(m => m.minutes > 0)
+          .sort((a, b) => b.minutes - a.minutes);
+        const maxMin = ranked[0]?.minutes ?? 1;
+
+        // Most popular activity
+        const actCount: Record<string, number> = {};
+        weekLogs.forEach(l => { actCount[l.activity_type] = (actCount[l.activity_type] ?? 0) + 1; });
+        const topActivity = Object.entries(actCount).sort((a, b) => b[1] - a[1])[0];
+
+        if (ranked.length === 0) return null;
+        return (
+          <div className="glass-card" style={{ padding: 'var(--space-6)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-5)' }}>
+              <div style={{ fontWeight: 700, fontSize: '1rem' }}>⏱ Participación Familiar esta semana</div>
+              <div style={{ display: 'flex', gap: 'var(--space-4)' }}>
+                {topActivity && (
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: '1.4rem' }}>{ACTIVITY_EMOJI[topActivity[0]] ?? '⭐'}</div>
+                    <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Favorita</div>
+                  </div>
+                )}
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '1.2rem', color: 'var(--secondary)' }}>{weekLogs.length}</div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Sesiones</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '1.2rem', color: 'var(--primary-light)' }}>{Math.round(weekMinutes / 60)}h</div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Total</div>
+                </div>
+              </div>
+            </div>
+            {ranked.map(m => (
+              <MemberBar key={m.id} name={m.name.split(' ')[0]} emoji={m.avatar_emoji} minutes={m.minutes} maxMinutes={maxMin} />
+            ))}
+          </div>
+        );
+      })()}
     </div>
   );
 }
