@@ -31,22 +31,63 @@ export default function FamilyLogPage() {
   const deleteEntry = useDeleteLogEntry();
 
   const [activity, setActivity] = useState<ActivityType>('dinner');
+  const [activityLabel, setActivityLabel] = useState('');
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [notes, setNotes] = useState('');
-  const [seconds, setSeconds] = useState(0);
-  const [running, setRunning] = useState(false);
-  const [manualMinutes, setManualMinutes] = useState('');
   const [mode, setMode] = useState<'timer' | 'manual'>('timer');
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [manualMinutes, setManualMinutes] = useState('');
+
+  // ── Timer: timestamp-based (survives screen-off) ──────────────────────────
+  const [elapsed, setElapsed] = useState(0);       // accumulated seconds
+  const [running, setRunning] = useState(false);
+  const startTimeRef = useRef<number | null>(null); // Date.now() when last started
+  const savedElapsedRef = useRef(0);                // seconds saved before last pause
+  const rafRef = useRef<number | null>(null);
+
+  const tick = () => {
+    if (startTimeRef.current !== null) {
+      const nowElapsed = savedElapsedRef.current + Math.floor((Date.now() - startTimeRef.current) / 1000);
+      setElapsed(nowElapsed);
+    }
+    rafRef.current = requestAnimationFrame(tick);
+  };
 
   useEffect(() => {
     if (running) {
-      intervalRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
+      startTimeRef.current = Date.now();
+      rafRef.current = requestAnimationFrame(tick);
     } else {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (startTimeRef.current !== null) {
+        // Save elapsed before pause
+        savedElapsedRef.current += Math.floor((Date.now() - startTimeRef.current) / 1000);
+        startTimeRef.current = null;
+        setElapsed(savedElapsedRef.current);
+      }
     }
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running]);
+
+  // Page Visibility API — recalculate when app comes back to foreground
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible' && running && startTimeRef.current !== null) {
+        const nowElapsed = savedElapsedRef.current + Math.floor((Date.now() - startTimeRef.current) / 1000);
+        setElapsed(nowElapsed);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [running]);
+
+  const resetTimer = () => {
+    setRunning(false);
+    setElapsed(0);
+    savedElapsedRef.current = 0;
+    startTimeRef.current = null;
+  };
+  // ─────────────────────────────────────────────────────────────────────────
 
   const toggleMember = (id: string) =>
     setSelectedMembers(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -55,21 +96,30 @@ export default function FamilyLogPage() {
     members.reduce<Record<string, typeof members[0]>>((a, m) => { a[m.id] = m; return a; }, {}), [members]);
 
   const handleSave = async () => {
-    const duration = mode === 'timer' ? Math.floor(seconds / 60) : parseInt(manualMinutes, 10);
+    const duration = mode === 'timer' ? Math.floor(elapsed / 60) : parseInt(manualMinutes, 10);
     if (!duration || duration < 1) { showToast({ type: 'error', title: 'Duración inválida', message: 'Mínimo 1 minuto' }); return; }
     if (selectedMembers.length === 0) { showToast({ type: 'error', title: 'Selecciona al menos un miembro' }); return; }
     if (!familyId) return;
+    if (activity === 'other' && !activityLabel.trim()) {
+      showToast({ type: 'error', title: 'Describe la actividad', message: 'El campo etiqueta es requerido para "Otro"' });
+      return;
+    }
     try {
       await createEntry.mutateAsync({
         activity_type: activity,
+        activity_label: activity === 'other' ? activityLabel.trim() : undefined,
         duration_minutes: duration,
         member_ids: selectedMembers,
         notes: notes.trim() || undefined,
         family_id: familyId,
         logged_at: new Date().toISOString(),
       });
-      setSeconds(0); setRunning(false); setNotes(''); setManualMinutes('');
-      showToast({ type: 'success', title: 'Actividad registrada 🎉', message: `${duration} min de ${ACTIVITIES.find(a => a.id === activity)?.label}` });
+      resetTimer();
+      setNotes('');
+      setManualMinutes('');
+      setActivityLabel('');
+      const label = activity === 'other' ? activityLabel.trim() : ACTIVITIES.find(a => a.id === activity)?.label;
+      showToast({ type: 'success', title: 'Actividad registrada 🎉', message: `${duration} min de ${label}` });
     } catch {
       showToast({ type: 'error', title: 'Error al guardar' });
     }
@@ -103,12 +153,26 @@ export default function FamilyLogPage() {
           <div className="activity-types-grid">
             {ACTIVITIES.map(a => (
               <button key={a.id} className={`activity-type-btn${activity === a.id ? ' selected' : ''}`}
-                onClick={() => setActivity(a.id)} id={`activity-${a.id}`}>
+                onClick={() => { setActivity(a.id); setActivityLabel(''); }} id={`activity-${a.id}`}>
                 <span className="activity-emoji">{a.emoji}</span>
                 {a.label}
               </button>
             ))}
           </div>
+          {/* Custom label for "Otro" */}
+          {activity === 'other' && (
+            <div className="form-group" style={{ marginTop: 'var(--space-4)' }}>
+              <label className="form-label" htmlFor="activity-label">¿Qué actividad fue? *</label>
+              <input
+                id="activity-label"
+                className="form-input"
+                value={activityLabel}
+                onChange={e => setActivityLabel(e.target.value)}
+                placeholder="ej. Cumpleaños, Excursión, Ejercicio..."
+                maxLength={50}
+              />
+            </div>
+          )}
         </div>
 
         {/* Members */}
@@ -136,9 +200,9 @@ export default function FamilyLogPage() {
           </div>
           {mode === 'timer' ? (
             <>
-              <div className="timer-display">{formatTime(seconds)}</div>
+              <div className="timer-display">{formatTime(elapsed)}</div>
               <div className="timer-controls">
-                <button className="btn btn-secondary" onClick={() => { setRunning(false); setSeconds(0); }} id="timer-reset">↺ Reset</button>
+                <button className="btn btn-secondary" onClick={resetTimer} id="timer-reset">↺ Reset</button>
                 <button className={`btn ${running ? 'btn-danger' : 'btn-primary'}`} onClick={() => setRunning(r => !r)} id="timer-toggle">
                   {running ? '⏸ Pausar' : '▶ Iniciar'}
                 </button>
@@ -183,11 +247,12 @@ export default function FamilyLogPage() {
           <div className="log-history-list">
             {logs.map(log => {
               const act = ACTIVITIES.find(a => a.id === log.activity_type);
+              const displayLabel = log.activity_label || act?.label || log.activity_type;
               return (
                 <div key={log.id} className="glass-card log-history-item">
                   <div style={{ fontSize: '1.5rem' }}>{act?.emoji ?? '⭐'}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{act?.label ?? log.activity_type}</div>
+                    <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{displayLabel}</div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
                       {log.member_ids.map(id => membersMap[id]?.avatar_emoji ?? '👤').join(' ')} ·{' '}
                       {new Date(log.logged_at).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
