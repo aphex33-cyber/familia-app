@@ -2,30 +2,21 @@ import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import {
-  useTasks, useCreateTask, useUpdateTask, useUpdateTaskStatus,
+  useTasks, useCreateTask, useUpdateTask,
   useDeleteTask, useAwardPoints,
 } from '../application/useTasks';
+import { useTaskCompletions, useToggleCompletion } from '../application/useTaskCompletions';
 import { useMembers } from '../application/useMembers';
 import { sortTasksByPriority, formatFrequency, getTasksForToday } from '../domain/taskEngine';
 import Modal from '../components/ui/Modal';
-import type { Task, TaskFrequency, TaskStatus } from '../domain/types';
+import type { Task, TaskFrequency } from '../domain/types';
 
 const DAY_NAMES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-const STATUS_LABEL: Record<TaskStatus, string> = {
-  pending: 'Pendiente', in_progress: 'En progreso', completed: 'Completada', skipped: 'Omitida',
-};
-const STATUS_BADGE: Record<TaskStatus, string> = {
-  pending: 'badge-amber', in_progress: 'badge-primary', completed: 'badge-green', skipped: 'badge-muted',
-};
 
 type TaskFormData = Omit<Task, 'id' | 'created_at' | 'updated_at'>;
 
 function TaskForm({
-  initial,
-  familyId,
-  members,
-  onSave,
-  onClose,
+  initial, familyId, members, onSave, onClose,
 }: {
   initial?: Partial<Task>;
   familyId: string;
@@ -76,8 +67,7 @@ function TaskForm({
           <label className="form-label">Días</label>
           <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
             {DAY_NAMES.map((d, i) => (
-              <button type="button" key={i}
-                onClick={() => toggleDay(i)}
+              <button type="button" key={i} onClick={() => toggleDay(i)}
                 className={`filter-btn${customDays.includes(i) ? ' active' : ''}`}
                 style={{ padding: 'var(--space-2) var(--space-3)', fontSize: '0.78rem' }}
               >{d}</button>
@@ -107,34 +97,40 @@ export default function TasksPage() {
   const { familyId, showToast } = useApp();
   const { currentMember, isAdmin } = useAuth();
   const { data: allTasks = [], isLoading } = useTasks(familyId);
+  const { data: completions = [] } = useTaskCompletions(familyId);
   const { data: members = [] } = useMembers(familyId);
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
-  const updateStatus = useUpdateTaskStatus();
   const deleteTask = useDeleteTask();
   const awardPoints = useAwardPoints();
+  const toggleCompletion = useToggleCompletion();
 
   const [showModal, setShowModal] = useState(false);
   const [editTask, setEditTask] = useState<Task | null>(null);
-  const [filter, setFilter] = useState<'all' | 'today' | TaskStatus>('all');
 
-  // Role-based: admins see all tasks; users see only their own
-  const tasks = useMemo(
-    () => isAdmin ? allTasks : allTasks.filter(t => t.assigned_to === currentMember?.id),
-    [allTasks, isAdmin, currentMember]
+  // Build a lookup: taskId → completion record for today
+  const completionMap = useMemo(() =>
+    completions.reduce<Record<string, typeof completions[0]>>((acc, c) => { acc[c.task_id] = c; return acc; }, {}),
+    [completions]
   );
 
-  const filtered = useMemo(() => {
-    let list = [...tasks];
-    if (filter === 'today') list = getTasksForToday(list);
-    else if (filter !== 'all') list = list.filter(t => t.status === filter);
-    return sortTasksByPriority(list);
-  }, [tasks, filter]);
+  // Today's tasks only (tasks scheduled for today's weekday)
+  const todayTasks = useMemo(() => sortTasksByPriority(getTasksForToday(allTasks)), [allTasks]);
 
   const membersMap = useMemo(() =>
     members.reduce<Record<string, typeof members[0]>>((a, m) => { a[m.id] = m; return a; }, {}), [members]);
 
-  const completedCount = tasks.filter(t => t.status === 'completed').length;
+  // Split: current user's tasks vs others'
+  const myTasks = useMemo(() =>
+    isAdmin ? todayTasks : todayTasks.filter(t => t.assigned_to === currentMember?.id),
+    [todayTasks, isAdmin, currentMember]
+  );
+  const otherTasks = useMemo(() =>
+    isAdmin ? [] : todayTasks.filter(t => t.assigned_to !== currentMember?.id),
+    [todayTasks, isAdmin, currentMember]
+  );
+
+  const completedCount = todayTasks.filter(t => completionMap[t.id]).length;
 
   const handleCreate = async (data: TaskFormData) => {
     try {
@@ -157,17 +153,19 @@ export default function TasksPage() {
     }
   };
 
-  const cycleStatus = async (task: Task) => {
-    const next: Record<TaskStatus, TaskStatus> = {
-      pending: 'in_progress', in_progress: 'completed', completed: 'pending', skipped: 'pending',
-    };
-    const nextStatus = next[task.status];
+  const handleToggle = async (task: Task) => {
+    if (!familyId) return;
+    const existing = completionMap[task.id];
     try {
-      await updateStatus.mutateAsync({ id: task.id, status: nextStatus, familyId: task.family_id });
-      // Award points when completing a task
-      if (nextStatus === 'completed' && task.assigned_to && familyId) {
+      await toggleCompletion.mutateAsync({
+        taskId: task.id,
+        familyId,
+        memberId: task.assigned_to,
+        existingId: existing?.id,
+      });
+      if (!existing) {
         awardPoints.mutate({ memberId: task.assigned_to, familyId, points: 10 });
-        showToast({ type: 'success', title: '🏆 +10 puntos', message: `Tarea "${task.description}" completada` });
+        showToast({ type: 'success', title: '🏆 +10 puntos', message: `"${task.description}" completada` });
       }
     } catch {
       showToast({ type: 'error', title: 'Error al actualizar' });
@@ -184,12 +182,57 @@ export default function TasksPage() {
     }
   };
 
+  const TaskCard = ({ task, isMine }: { task: Task; isMine: boolean }) => {
+    const member = membersMap[task.assigned_to];
+    const done = !!completionMap[task.id];
+    return (
+      <div
+        className="glass-card task-card"
+        style={{ opacity: isMine ? 1 : 0.55, borderLeft: isMine ? '3px solid var(--primary)' : undefined }}
+      >
+        <span className={`status-dot ${done ? 'completed' : 'pending'}`} />
+        <div className="task-card-info">
+          <div className="task-card-name"
+            style={{ textDecoration: done ? 'line-through' : 'none', color: done ? 'var(--text-muted)' : undefined }}>
+            {task.description}
+          </div>
+          <div className="task-card-meta">
+            <span className={`badge ${done ? 'badge-green' : 'badge-amber'}`}>{done ? '✓ Completada hoy' : 'Pendiente hoy'}</span>
+            <span className="badge badge-muted">🔁 {formatFrequency(task)}</span>
+            {member && <span className="badge badge-muted">{member.avatar_emoji} {member.name}</span>}
+            {task.alarm_time && <span className="badge badge-muted">⏰ {task.alarm_time}</span>}
+          </div>
+        </div>
+        <div className="task-card-actions">
+          {isMine && (
+            <button
+              className={`btn btn-sm ${done ? 'btn-secondary' : 'btn-primary'}`}
+              onClick={() => handleToggle(task)}
+              id={`task-toggle-${task.id}`}
+              title={done ? 'Marcar pendiente' : 'Completar'}
+            >
+              {done ? '↺' : '✓'}
+            </button>
+          )}
+          {isAdmin && (
+            <button className="btn btn-ghost btn-sm btn-icon" onClick={() => setEditTask(task)}
+              id={`task-edit-${task.id}`} title="Editar">✏️</button>
+          )}
+          {isAdmin && (
+            <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(task)}
+              id={`task-delete-${task.id}`} title="Eliminar">✕</button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <>
       <div className="page-header">
         <div>
           <div className="page-title">Domestic Engine</div>
-          <div className="page-subtitle">{tasks.length} tareas · {tasks.filter(t => t.status === 'completed').length} completadas</div>
+          <div className="page-subtitle">{todayTasks.length} tareas hoy · {completedCount} completadas</div>
         </div>
         {isAdmin && (
           <button className="btn btn-primary" onClick={() => setShowModal(true)} id="new-task-btn">
@@ -198,65 +241,42 @@ export default function TasksPage() {
         )}
       </div>
 
-      {/* Filters */}
-      <div className="tasks-filters">
-        {(['all', 'today', 'pending', 'in_progress', 'completed'] as const).map(f => (
-          <button key={f} className={`filter-btn${filter === f ? ' active' : ''}`}
-            onClick={() => setFilter(f)} id={`filter-${f}`}>
-            {f === 'all' ? 'Todas' : f === 'today' ? 'Hoy' : STATUS_LABEL[f as TaskStatus]}
-          </button>
-        ))}
-      </div>
-
-      {/* Task List */}
       {isLoading ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
           {[1,2,3,4].map(i => <div key={i} className="skeleton" style={{ height: 72 }} />)}
         </div>
-      ) : filtered.length === 0 ? (
+      ) : todayTasks.length === 0 ? (
         <div className="glass-card" style={{ padding: 'var(--space-10)', textAlign: 'center', color: 'var(--text-muted)' }}>
           <div style={{ fontSize: '2rem', marginBottom: 'var(--space-3)' }}>✓</div>
-          <div>No hay tareas en esta vista</div>
+          <div>No hay tareas programadas para hoy</div>
         </div>
       ) : (
-        <div className="tasks-grid">
-          {filtered.map(task => {
-            const member = membersMap[task.assigned_to];
-            return (
-              <div key={task.id} className="glass-card task-card">
-                <span className={`status-dot ${task.status}`} />
-                <div className="task-card-info">
-                  <div className="task-card-name"
-                    style={{
-                      textDecoration: task.status === 'completed' ? 'line-through' : 'none',
-                      color: task.status === 'completed' ? 'var(--text-muted)' : undefined,
-                    }}>
-                    {task.description}
-                  </div>
-                  <div className="task-card-meta">
-                    <span className={`badge ${STATUS_BADGE[task.status]}`}>{STATUS_LABEL[task.status]}</span>
-                    <span className="badge badge-muted">🔁 {formatFrequency(task)}</span>
-                    {member && <span className="badge badge-muted">{member.avatar_emoji} {member.name}</span>}
-                    {task.alarm_time && <span className="badge badge-muted">⏰ {task.alarm_time}</span>}
-                  </div>
-                </div>
-                <div className="task-card-actions">
-                  <button className="btn btn-secondary btn-sm" onClick={() => cycleStatus(task)}
-                    id={`task-status-${task.id}`} title="Cambiar estado">
-                    {task.status === 'pending' ? '▶' : task.status === 'in_progress' ? '✓' : '↺'}
-                  </button>
-                  {isAdmin && (
-                    <button className="btn btn-ghost btn-sm btn-icon" onClick={() => setEditTask(task)}
-                      id={`task-edit-${task.id}`} title="Editar">✏️</button>
-                  )}
-                  {isAdmin && (
-                    <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(task)}
-                      id={`task-delete-${task.id}`} title="Eliminar">✕</button>
-                  )}
-                </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+          {/* My tasks */}
+          <div>
+            <div style={{ fontWeight: 700, fontSize: '0.8rem', letterSpacing: '0.08em', color: 'var(--primary-light)', marginBottom: 'var(--space-3)', textTransform: 'uppercase' }}>
+              {isAdmin ? 'Todas las tareas de hoy' : '⭐ Mis tareas de hoy'}
+            </div>
+            <div className="tasks-grid">
+              {(isAdmin ? todayTasks : myTasks).map(task => (
+                <TaskCard key={task.id} task={task} isMine={true} />
+              ))}
+            </div>
+          </div>
+
+          {/* Others' tasks (non-admin only) */}
+          {!isAdmin && otherTasks.length > 0 && (
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '0.8rem', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: 'var(--space-3)', textTransform: 'uppercase' }}>
+                Tareas de los demás
               </div>
-            );
-          })}
+              <div className="tasks-grid">
+                {otherTasks.map(task => (
+                  <TaskCard key={task.id} task={task} isMine={false} />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -268,12 +288,7 @@ export default function TasksPage() {
               ⚠️ Primero agrega miembros a tu familia en la sección "Miembros".
             </div>
           ) : (
-            <TaskForm
-              familyId={familyId!}
-              members={members}
-              onSave={handleCreate}
-              onClose={() => setShowModal(false)}
-            />
+            <TaskForm familyId={familyId!} members={members} onSave={handleCreate} onClose={() => setShowModal(false)} />
           )}
         </Modal>
       )}
@@ -281,13 +296,7 @@ export default function TasksPage() {
       {/* Edit Modal */}
       {editTask && familyId && (
         <Modal title="Editar Tarea" onClose={() => setEditTask(null)}>
-          <TaskForm
-            initial={editTask}
-            familyId={familyId}
-            members={members}
-            onSave={handleEdit}
-            onClose={() => setEditTask(null)}
-          />
+          <TaskForm initial={editTask} familyId={familyId} members={members} onSave={handleEdit} onClose={() => setEditTask(null)} />
         </Modal>
       )}
     </>
