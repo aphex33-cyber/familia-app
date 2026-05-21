@@ -44,11 +44,23 @@ export type ActivityType =
 export interface FamilyLogEntry {
   id: string;
   activity_type: ActivityType;
+  activity_label?: string; // custom label when activity_type === 'other'
   duration_minutes: number;
   member_ids: string[];
   notes?: string;
   family_id: string;
   logged_at: string;
+}
+
+/** One completion record per task per calendar day */
+export interface TaskCompletion {
+  id: string;
+  task_id: string;
+  family_id: string;
+  date: string;          // ISO date 'YYYY-MM-DD'
+  status: 'completed' | 'skipped';
+  member_id?: string;
+  completed_at: string;
 }
 
 export interface WeeklyScorecard {
