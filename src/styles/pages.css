@@ -353,3 +353,42 @@
   transition: all var(--transition-fast);
 }
 .sidebar-logout-btn:hover { color: var(--accent-red); border-color: rgba(255,71,87,0.3); background: rgba(255,71,87,0.07); }
+
+/* Daily Bible Verse Card */
+.daily-verse-card {
+  max-width: 440px; width: 100%;
+  background: linear-gradient(135deg, rgba(108,99,255,0.08), rgba(0,212,170,0.06));
+  border: 1px solid rgba(255,210,100,0.2);
+  border-radius: var(--radius-xl);
+  padding: var(--space-5) var(--space-6);
+  text-align: center;
+  backdrop-filter: blur(10px);
+  animation: scaleIn 0.5s ease;
+  position: relative;
+}
+.daily-verse-card::before {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: var(--radius-xl);
+  background: linear-gradient(135deg, rgba(255,210,100,0.04), transparent);
+  pointer-events: none;
+}
+.daily-verse-icon {
+  font-size: 1.1rem; margin-bottom: var(--space-3);
+  opacity: 0.7;
+}
+.daily-verse-text {
+  font-size: 0.88rem;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  font-style: italic;
+  margin: 0 0 var(--space-3);
+  quotes: none;
+}
+.daily-verse-ref {
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: rgba(255,210,100,0.7);
+  font-style: normal;
+  letter-spacing: 0.04em;
+}
