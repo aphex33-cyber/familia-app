@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AppProvider, useApp } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import AppLayout from './components/layout/AppLayout';
+import DailyVerseModal from './components/ui/DailyVerseModal';
 import DashboardPage from './pages/DashboardPage';
 import TasksPage from './pages/TasksPage';
 import FamilyLogPage from './pages/FamilyLogPage';
@@ -24,6 +25,16 @@ function AppInner() {
   const [page, setPage] = useState<Page>('dashboard');
   const { familyId } = useApp();
   const { currentMember } = useAuth();
+  const [showVerse, setShowVerse] = useState(false);
+  const prevMemberRef = useRef(currentMember);
+
+  // Detect fresh login: member goes from null → someone
+  useEffect(() => {
+    if (!prevMemberRef.current && currentMember) {
+      setShowVerse(true);
+    }
+    prevMemberRef.current = currentMember;
+  }, [currentMember]);
 
   // No family → first-time setup
   if (!familyId) return <SetupPage />;
@@ -45,9 +56,17 @@ function AppInner() {
   };
 
   return (
-    <AppLayout currentPage={page} onNavigate={setPage}>
-      {renderPage()}
-    </AppLayout>
+    <>
+      {showVerse && (
+        <DailyVerseModal
+          memberName={currentMember.name}
+          onClose={() => setShowVerse(false)}
+        />
+      )}
+      <AppLayout currentPage={page} onNavigate={setPage}>
+        {renderPage()}
+      </AppLayout>
+    </>
   );
 }
 
