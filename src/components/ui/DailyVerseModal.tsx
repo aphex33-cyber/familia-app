@@ -2,8 +2,12 @@
  * DailyVerseModal — Popup con versículo bíblico Reina-Valera 1960
  * Se muestra una vez por sesión, justo después de iniciar sesión con PIN.
  * Mismo versículo para toda la familia cada día (basado en día del año).
+ *
+ * Usa ReactDOM.createPortal para montarse directamente en document.body,
+ * garantizando centrado perfecto sin importar el layout o transforms del padre.
  */
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 const VERSES = [
   { ref: 'Josué 24:15',       text: '…Pero yo y mi casa serviremos a Jehová.' },
@@ -61,20 +65,28 @@ export default function DailyVerseModal({ memberName, onClose }: DailyVerseModal
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    // Small delay for entrance animation
+    // Bloquea el scroll del body mientras el modal está abierto
+    document.body.style.overflow = 'hidden';
     const t = setTimeout(() => setVisible(true), 50);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      document.body.style.overflow = '';
+    };
   }, []);
 
   const handleClose = () => {
     setVisible(false);
-    setTimeout(onClose, 300); // wait for fade-out
+    setTimeout(onClose, 300);
   };
 
-  return (
+  // Portal: se monta en document.body para escapar de cualquier stacking context del padre
+  return createPortal(
     <div
       className={`verse-modal-overlay${visible ? ' visible' : ''}`}
       onClick={handleClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Versículo del día"
     >
       <div
         className={`verse-modal-content${visible ? ' visible' : ''}`}
@@ -90,10 +102,11 @@ export default function DailyVerseModal({ memberName, onClose }: DailyVerseModal
           "{verse.text}"
         </blockquote>
         <cite className="verse-modal-ref">— {verse.ref} · RVR 1960</cite>
-        <button className="verse-modal-btn" onClick={handleClose}>
+        <button className="verse-modal-btn" onClick={handleClose} autoFocus>
           🙏 Amén — Continuar
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
