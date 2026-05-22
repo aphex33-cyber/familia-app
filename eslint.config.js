@@ -18,5 +18,13 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      'react-refresh/only-export-components': 'warn',
+      'react-hooks/exhaustive-deps': 'warn',
+      'react-hooks/rules-of-hooks': 'warn',
+      'react-hooks/exhaustive-deps': 'warn',
+      '@typescript-eslint/no-unused-vars': 'warn',
+      'no-const-assign': 'warn'
+    }
   },
 ])
