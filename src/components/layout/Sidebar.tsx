@@ -25,7 +25,6 @@ export default function Sidebar({ currentPage, onNavigate, isOpen, onClose }: Si
   const { currentMember, logout, isAdmin } = useAuth();
   const { data: members } = useMembers(familyId);
 
-  let lastSection = '';
 
   return (
     <>
@@ -52,27 +51,30 @@ export default function Sidebar({ currentPage, onNavigate, isOpen, onClose }: Si
 
         {/* Nav */}
         <nav className="sidebar-nav">
-          {navItems.map(item => {
-            // Non-admin members don't need Analytics or Members pages
-            const hidden = !isAdmin && (item.id === 'analytics' || item.id === 'members');
-            if (hidden) return null;
+          {(() => {
+            let currentSection = '';
+            return navItems.map(item => {
+              // Non-admin members don't need Analytics or Members pages
+              const hidden = !isAdmin && (item.id === 'analytics' || item.id === 'members');
+              if (hidden) return null;
 
-            const showSection = item.section && item.section !== lastSection;
-            if (item.section) lastSection = item.section;
-            return (
-              <React.Fragment key={item.id}>
-                {showSection && <div className="sidebar-section-label">{item.section}</div>}
-                <button
-                  className={`nav-item${currentPage === item.id ? ' active' : ''}`}
-                  onClick={() => { onNavigate(item.id); onClose(); }}
-                  aria-current={currentPage === item.id ? 'page' : undefined}
-                >
-                  <span style={{ fontSize: '1rem', width: 18, textAlign: 'center' }}>{item.icon}</span>
-                  {item.label}
-                </button>
-              </React.Fragment>
-            );
-          })}
+              const showSection = item.section && item.section !== currentSection;
+              if (item.section) currentSection = item.section;
+              return (
+                <React.Fragment key={item.id}>
+                  {showSection && <div className="sidebar-section-label">{item.section}</div>}
+                  <button
+                    className={`nav-item${currentPage === item.id ? ' active' : ''}`}
+                    onClick={() => { onNavigate(item.id); onClose(); }}
+                    aria-current={currentPage === item.id ? 'page' : undefined}
+                  >
+                    <span style={{ fontSize: '1rem', width: 18, textAlign: 'center' }}>{item.icon}</span>
+                    {item.label}
+                  </button>
+                </React.Fragment>
+              );
+            });
+          })()}
         </nav>
 
         {/* Bottom */}
