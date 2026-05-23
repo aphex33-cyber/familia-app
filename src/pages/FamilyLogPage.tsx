@@ -143,7 +143,7 @@ export default function FamilyLogPage() {
         <div className="page-header" style={{ marginBottom: 0 }}>
           <div>
             <div className="page-title">Registrar Actividad</div>
-            <div className="page-subtitle">Esta semana: <span style={{ color: 'var(--secondary)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{Math.round(totalWeekMin / 60)}h {totalWeekMin % 60}min</span></div>
+            <div className="page-subtitle">Esta semana: <span style={{ color: 'var(--secondary)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{Math.floor(totalWeekMin / 60)}h {totalWeekMin % 60}min</span></div>
           </div>
         </div>
 
