@@ -175,7 +175,7 @@ export default function AnalyticsPage() {
           deltaUp={harmony.score >= 60}
         />
         <KPICard
-          value={`${Math.round(weekMinutes / 60)}h ${weekMinutes % 60}m`}
+          value={`${Math.floor(weekMinutes / 60)}h ${weekMinutes % 60}m`}
           label="Tiempo Familiar"
           color="var(--secondary)"
         />
