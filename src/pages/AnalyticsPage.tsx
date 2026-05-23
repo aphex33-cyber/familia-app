@@ -21,11 +21,13 @@ function getMondayISO(): string {
 function BarChart({
   data,
   color,
+  maxValue,
 }: {
   data: { label: string; value: number }[];
   color: string;
+  maxValue?: number;
 }) {
-  const max = Math.max(...data.map(d => d.value), 1);
+  const max = maxValue ?? Math.max(...data.map(d => d.value), 1);
   return (
     <div className="bar-chart">
       {data.map((d, i) => (
@@ -234,6 +236,7 @@ export default function AnalyticsPage() {
               <BarChart
                 data={harmonyHistory}
                 color={`linear-gradient(180deg, ${getHarmonyColor(harmony.rating)}, transparent)`}
+                maxValue={100}
               />
             </div>
           </div>
